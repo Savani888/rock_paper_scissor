@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rock Paper Scissors</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="arena" aria-label="Camera game arena">
+        <div class="video-stage">
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div class="scanline" aria-hidden="true"></div>
+          <div class="hud top-left">
+            <span id="modelState">Loading AIML vision...</span>
+          </div>
+          <div class="hud top-right">
+            <span id="confidence">0%</span>
+          </div>
+          <div class="countdown" id="countdown">READY</div>
+        </div>
+
+        <aside class="panel" aria-label="Game controls and score">
+          <div class="brand">
+            <span class="mark">RPS</span>
+            <div>
+              <h1>RPS Machine</h1>
+              <p>Camera reads the hand. Machine answers instantly.</p>
+            </div>
+          </div>
+
+          <div class="moves">
+            <div class="move-tile">
+              <span class="label">You</span>
+              <strong id="humanMove">-</strong>
+            </div>
+            <div class="move-tile machine">
+              <span class="label">Machine</span>
+              <strong id="machineMove">-</strong>
+            </div>
+          </div>
+
+          <div class="result" id="result">Start camera to play</div>
+
+          <div class="scoreboard">
+            <div>
+              <span>Rounds</span>
+              <strong id="rounds">0</strong>
+            </div>
+            <div>
+              <span>Machine</span>
+              <strong id="machineScore">0</strong>
+            </div>
+            <div>
+              <span>You</span>
+              <strong id="humanScore">0</strong>
+            </div>
+          </div>
+
+          <div class="mode-row" role="group" aria-label="Mode">
+            <button class="mode active" id="unbeatableMode" type="button">Counter</button>
+            <button class="mode" id="predictMode" type="button">Predict</button>
+          </div>
+
+          <div class="actions">
+            <button id="cameraButton" type="button">Start Camera</button>
+            <button id="playButton" type="button" disabled>Play Round</button>
+          </div>
+
+          <div class="trainer" aria-label="Dataset trainer">
+            <div class="section-title">
+              
+              <strong id="datasetCount">0 samples</strong>
+            </div>
+
+            <input id="gestureLabel" type="text" placeholder="gesture label" autocomplete="off" />
+
+            <div class="actions compact">
+              <button id="captureButton" type="button" disabled>Capture Pose</button>
+              <button id="recordButton" type="button" disabled>Record Motion</button>
+            </div>
+
+            <div class="actions compact">
+              <button id="exportButton" type="button">Export JSON</button>
+              <button id="importButton" type="button">Import JSON</button>
+            </div>
+
+            <input id="importFile" type="file" accept="application/json" hidden />
+
+            <div class="prediction-box">
+              <span class="label">Custom Prediction</span>
+              <strong id="customPrediction">Need samples</strong>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
