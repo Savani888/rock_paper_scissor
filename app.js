@@ -3,6 +3,7 @@ import {
   FilesetResolver,
   GestureRecognizer,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs";
+import { createTournament, recordTournamentRound } from "./tournament.mjs";
 
 const video = document.querySelector("#webcam");
 const canvas = document.querySelector("#overlay");
@@ -28,6 +29,21 @@ const exportButton = document.querySelector("#exportButton");
 const importButton = document.querySelector("#importButton");
 const importFile = document.querySelector("#importFile");
 const customPredictionEl = document.querySelector("#customPrediction");
+const playerCountEl = document.querySelector("#playerCount");
+const humanPlayersEl = document.querySelector("#humanPlayers");
+const playerScoreboardEl = document.querySelector("#playerScoreboard");
+const roomCodeInput = document.querySelector("#roomCode");
+const playerNameInput = document.querySelector("#playerName");
+const joinRoomButton = document.querySelector("#joinRoomButton");
+const roomStatusEl = document.querySelector("#roomStatus");
+const demo2Button = document.querySelector("#demo2Button");
+const demo3Button = document.querySelector("#demo3Button");
+const demo4Button = document.querySelector("#demo4Button");
+const tournamentEnabledEl = document.querySelector("#tournamentEnabled");
+const tournamentBestOfEl = document.querySelector("#tournamentBestOf");
+const tournamentStatusEl = document.querySelector("#tournamentStatus");
+const tournamentHistoryEl = document.querySelector("#tournamentHistory");
+const resetTournamentButton = document.querySelector("#resetTournamentButton");
 
 const GESTURE_TO_MOVE = {
   Closed_Fist: "rock",
@@ -89,10 +105,187 @@ let roundSamples = [];
 let recordingMotion = false;
 let motionFrames = [];
 let liveMotionFrames = [];
+let lastLockedHumanMove = "unknown";
 let finalHumanMove = "unknown";
 let finalMachineMove = "unknown";
 const score = { rounds: 0, machine: 0, human: 0 };
+let tournament = createTournament();
+const defaultHumanNames = ["Player 1", "Player 2", "Player 3", "Player 4"];
+const humanPlayers = defaultHumanNames.map((name) => ({ name, score: 0 }));
+const demoNames = ["Ava", "Ben", "Cara", "Derrick"];
 const dataset = loadDataset();
+const wsProtocol = location.protocol === "https:" ? "wss" : "ws";
+let socket = null;
+let playerId = "";
+let roomCode = "DEMO";
+let isHost = false;
+let roomPlayers = [];
+let roomStarted = false;
+let localMoveSubmitted = false;
+let demoMode = false;
+let selectedRole = "host";
+const roleButtons = Array.from(document.querySelectorAll(".role-option"));
+const roomCodeBadge = document.querySelector("#roomCodeBadge");
+
+function sendRoomMessage(payload) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify(payload));
+}
+
+function updateRoomStatus(text) {
+  roomStatusEl.textContent = text;
+}
+
+function setSelectedRole(role) {
+  selectedRole = role === "participant" ? "participant" : "host";
+  roleButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.role === selectedRole);
+  });
+
+  const nameValue = playerNameInput.value.trim();
+  if (!nameValue || nameValue === "You" || nameValue === "Host") {
+    playerNameInput.value = selectedRole === "host" ? "Host" : "Participant";
+  }
+
+  updateRoomStatus(selectedRole === "host" ? "Host ready to start the round" : "Participant ready to join the lobby");
+}
+
+function renderLobbyPlayers() {
+  const players = roomPlayers.length ? roomPlayers : humanPlayers.slice(0, Number(playerCountEl.value) || 1).map((player) => ({
+    id: `${player.name}-${Math.random().toString(16).slice(2, 6)}`,
+    name: player.name,
+    score: player.score,
+    isHost: player.name === "Host" || player.name === "You",
+  }));
+
+  const lobbyEntries = players.map((player, index) => {
+    const isCurrentUser = player.name === (playerNameInput.value || "").trim() || index === 0;
+    const roleLabel = player.isHost ? "Host" : "Ready";
+    const statusClass = player.isHost ? "host" : "ready";
+    const initials = (player.name || "P").split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase() || "P";
+
+    return `
+      <div class="lobby-player">
+        <div class="lobby-player-main">
+          <div class="lobby-avatar">${initials}</div>
+          <div>
+            <div class="lobby-player-name">${player.name}</div>
+          </div>
+        </div>
+        <span class="status-pill ${statusClass}">${player.isHost ? "Host" : isCurrentUser ? "You" : roleLabel}</span>
+      </div>
+    `;
+  });
+
+  const lobbyEl = document.querySelector("#lobbyPlayers");
+  lobbyEl.innerHTML = lobbyEntries.join("");
+}
+
+function setDemoMode(playerCount) {
+  demoMode = true;
+  const totalPlayers = Math.max(1, Math.min(4, Number(playerCount) || 1));
+  playerCountEl.value = String(totalPlayers);
+  humanPlayers[0].name = (playerNameInput.value || "Host").trim() || "Host";
+  for (let index = 1; index < 4; index += 1) {
+    humanPlayers[index] = {
+      name: index < totalPlayers ? demoNames[index - 1] : defaultHumanNames[index],
+      score: 0,
+    };
+  }
+  syncHumanPlayers();
+  renderLobbyPlayers();
+  renderPlayerScores();
+  updateRoomStatus(`Presentation demo ready: ${totalPlayers} human players total`);
+}
+
+function joinRoom() {
+  const name = (playerNameInput.value || (selectedRole === "host" ? "Host" : "Participant")).trim() || (selectedRole === "host" ? "Host" : "Participant");
+  const nextRoomCode = (roomCodeInput.value || "DEMO").trim().toUpperCase() || "DEMO";
+  roomCode = nextRoomCode;
+  playerNameInput.value = name;
+  roomCodeInput.value = roomCode;
+
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.close();
+  }
+
+  const wsUrl = `${wsProtocol}://${location.hostname}:${location.port || 3000}`;
+  socket = new WebSocket(wsUrl);
+  updateRoomStatus("Joining room...");
+
+  socket.addEventListener("open", () => {
+    sendRoomMessage({
+      type: "join_room",
+      roomCode,
+      name,
+      playerId,
+    });
+  });
+
+  socket.addEventListener("message", (event) => {
+    try {
+      const message = JSON.parse(event.data);
+
+      if (message.type === "joined") {
+        playerId = message.playerId;
+        isHost = Boolean(message.isHost) || selectedRole === "host";
+        const roleText = isHost ? "Host" : "Participant";
+        updateRoomStatus(`Connected to room ${roomCode} as ${roleText}`);
+        roomCodeBadge.textContent = roomCode;
+        renderLobbyPlayers();
+        return;
+      }
+
+      if (message.type === "room_state") {
+        roomPlayers = message.players || [];
+        const hostLabel = roomPlayers.find((player) => player.isHost)?.name || "Host";
+        roomCodeBadge.textContent = message.roomCode;
+        updateRoomStatus(`Room ${message.roomCode}: ${roomPlayers.length} player(s) • Host: ${hostLabel}`);
+        renderLobbyPlayers();
+        return;
+      }
+
+      if (message.type === "round_started") {
+        roomStarted = true;
+        localMoveSubmitted = false;
+        resultEl.textContent = "Round started — show your move";
+        countdownEl.textContent = "GO";
+        return;
+      }
+
+      if (message.type === "round_result") {
+        roomStarted = false;
+        const summary = message.results || [];
+        const winners = message.winners || [];
+        const losers = message.losers || [];
+        const ties = message.ties || [];
+        const botText = `Bot: ${EMOJI[message.botMove] || message.botMove}`;
+
+        if (winners.length || losers.length || ties.length) {
+          const winText = winners.length ? `${winners.join(", ")} beat the bot` : "";
+          const loseText = losers.length ? `Bot beat ${losers.join(", ")}` : "";
+          const tieText = ties.length ? `Tied: ${ties.join(", ")}` : "";
+          resultEl.textContent = [winText, loseText, tieText, botText].filter(Boolean).join(" • ");
+        } else {
+          resultEl.textContent = `Bot chose ${botText}`;
+        }
+
+        const localResult = summary.find((player) => player.id === playerId);
+        if (tournamentEnabledEl.checked && localResult) {
+          recordTournamentRoundResult(localResult.name, localResult.outcome);
+        }
+
+        countdownEl.textContent = "READY";
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    updateRoomStatus("Disconnected from room");
+  });
+}
 
 async function bootModel() {
   try {
@@ -130,6 +323,7 @@ async function startCamera() {
         width: { ideal: 1280 },
         height: { ideal: 720 },
         facingMode: "user",
+        aspectRatio: 16 / 9,
       },
       audio: false,
     });
@@ -217,6 +411,21 @@ function processVisionResult(result) {
     roundSamples.push(displayedMove);
     if (mode === "predict") predictionSamples.push(displayedMove);
   }
+
+  if (socket && socket.readyState === WebSocket.OPEN && roomStarted && !localMoveSubmitted && displayedMove !== "unknown" && displayedConfidence > 0.55) {
+    localMoveSubmitted = true;
+    sendRoomMessage({
+      type: "player_move",
+      roomCode,
+      playerId,
+      move: displayedMove,
+    });
+    resultEl.textContent = "Move sent — waiting for round result";
+  }
+}
+
+function getCurrentRoleLabel() {
+  return selectedRole === "host" || isHost ? "Host" : "Participant";
 }
 
 function setMode(nextMode) {
@@ -227,6 +436,21 @@ function setMode(nextMode) {
 }
 
 async function playRound() {
+  if (tournamentEnabledEl.checked && tournament.winner) return;
+
+  if (socket && socket.readyState === WebSocket.OPEN && roomCode) {
+    if (isHost) {
+      sendRoomMessage({
+        type: "start_round",
+        roomCode,
+        playerId,
+      });
+    } else {
+      resultEl.textContent = "Waiting for host to start the round";
+    }
+    return;
+  }
+
   if (roundRunning || !cameraRunning) return;
 
   roundRunning = true;
@@ -243,14 +467,13 @@ async function playRound() {
   await tick("2");
   await tick("1");
 
-  const currentMove = resolveCurrentMove();
-  const lockedMachineMove = chooseMachineMove(currentMove);
+  const roundPlayers = getRoundPlayers();
+  const lockedMachineMove = chooseMachineMove(roundPlayers.map((player) => player.move));
   machineMoveEl.textContent = EMOJI[lockedMachineMove];
 
   await tick("SHOOT");
 
-  const humanMove = getFinalHumanMove();
-  finishRound(humanMove, lockedMachineMove);
+  finishRound(roundPlayers, lockedMachineMove);
 }
 
 function tick(text) {
@@ -260,39 +483,229 @@ function tick(text) {
 }
 
 function chooseMachineMove(humanMove) {
+  const moveList = Array.isArray(humanMove) ? humanMove : [humanMove];
+  const validMoves = moveList.filter(isRpsMove);
+  const dominantMove = mostCommon(validMoves) || moveList[0] || "rock";
+
   if (mode === "unbeatable") {
-    return humanMove === "unknown" ? randomMove() : COUNTER[humanMove];
+    return isRpsMove(dominantMove) ? COUNTER[dominantMove] : randomMove();
   }
 
-  const predicted = mostCommon(predictionSamples) || humanMove;
+  const predicted = mostCommon(predictionSamples) || dominantMove;
   if (!isRpsMove(predicted)) return randomMove();
   return COUNTER[predicted];
 }
 
-function finishRound(humanMove, machineMove) {
-  const outcome = getOutcome(humanMove, machineMove);
-  finalHumanMove = humanMove;
+function finishRound(humanPlayersForRound, machineMove) {
+  const roundResults = Array.isArray(humanPlayersForRound)
+    ? humanPlayersForRound.map((player) => ({
+        ...player,
+        outcome: getOutcome(player.move, machineMove),
+      }))
+    : [{
+        name: "You",
+        move: humanPlayersForRound,
+        outcome: getOutcome(humanPlayersForRound, machineMove),
+      }];
+
+  const firstPlayerMove = roundResults[0]?.move || "unknown";
+  finalHumanMove = firstPlayerMove;
   finalMachineMove = machineMove;
+  if (isRpsMove(firstPlayerMove)) lastLockedHumanMove = firstPlayerMove;
   roundComplete = true;
   machineMoveEl.textContent = EMOJI[machineMove];
-  humanMoveEl.textContent = EMOJI[humanMove];
+  humanMoveEl.textContent = EMOJI[firstPlayerMove] || "-";
   countdownEl.textContent = "READY";
 
   score.rounds += 1;
-  if (outcome === "machine") score.machine += 1;
-  if (outcome === "human") score.human += 1;
+  let humanWins = 0;
+  let machineWins = 0;
+
+  roundResults.forEach((player, index) => {
+    if (player.outcome === "machine") {
+      score.machine += 1;
+      machineWins += 1;
+    }
+    if (player.outcome === "human") {
+      score.human += 1;
+      humanWins += 1;
+      if (humanPlayers[index]) humanPlayers[index].score += 1;
+    }
+  });
 
   roundsEl.textContent = score.rounds;
   machineScoreEl.textContent = score.machine;
   humanScoreEl.textContent = score.human;
 
-  if (outcome === "machine") resultEl.textContent = `Machine wins: ${EMOJI[machineMove]} beats ${EMOJI[humanMove]}`;
-  if (outcome === "tie") resultEl.textContent = `Tie: both chose ${EMOJI[humanMove]}`;
-  if (outcome === "human") resultEl.textContent = `You win: ${EMOJI[humanMove]} beats ${EMOJI[machineMove]}`;
-  if (outcome === "unknown") resultEl.textContent = "No clear hand";
+  if (roundResults.length > 1) {
+    const winners = roundResults.filter((player) => player.outcome === "human").map((player) => player.name);
+    const losers = roundResults.filter((player) => player.outcome === "machine").map((player) => player.name);
 
+    if (winners.length && !losers.length) {
+      resultEl.textContent = `${winners.join(" & ")} beat the bot`;
+    } else if (losers.length && !winners.length) {
+      resultEl.textContent = `Bot wins against ${losers.join(" & ")}`;
+    } else if (winners.length && losers.length) {
+      resultEl.textContent = `${winners.join(" & ")} win; bot beats ${losers.join(" & ")}`;
+    } else {
+      resultEl.textContent = `Tie: everyone chose ${EMOJI[machineMove]}`;
+    }
+  } else {
+    const outcome = roundResults[0].outcome;
+    if (outcome === "machine") resultEl.textContent = `Machine wins: ${EMOJI[machineMove]} beats ${EMOJI[firstPlayerMove]}`;
+    if (outcome === "tie") resultEl.textContent = `Tie: both chose ${EMOJI[firstPlayerMove]}`;
+    if (outcome === "human") resultEl.textContent = `You win: ${EMOJI[firstPlayerMove]} beats ${EMOJI[machineMove]}`;
+    if (outcome === "unknown") resultEl.textContent = "No clear hand";
+  }
+
+  if (tournamentEnabledEl.checked && roundResults[0]) {
+    recordTournamentRoundResult(roundResults[0].name, roundResults[0].outcome);
+  }
+
+  roundResults.forEach((player) => {
+    if (player.index > 0 && isRpsMove(player.move)) {
+      setPlayerMoveStatus(player.index, player.move);
+    }
+  });
+
+  renderPlayerScores();
   roundRunning = false;
-  playButton.disabled = false;
+  playButton.disabled = tournamentEnabledEl.checked && tournament.winner !== null;
+}
+
+function recordTournamentRoundResult(playerName, outcome) {
+  tournament = recordTournamentRound(tournament, playerName, outcome);
+  renderTournamentScoreboard();
+
+  if (tournament.winner) {
+    resultEl.textContent = `${tournament.winner} wins the tournament trophy!`;
+    playButton.disabled = true;
+  }
+}
+
+function renderTournamentScoreboard() {
+  if (!tournamentEnabledEl.checked) {
+    tournamentStatusEl.textContent = "Tournament mode is off";
+    tournamentHistoryEl.replaceChildren();
+    return;
+  }
+
+  tournamentStatusEl.textContent = tournament.winner
+    ? `${tournament.winner} takes the trophy · final ${tournament.humanWins}–${tournament.machineWins}`
+    : `First to ${tournament.winsNeeded} · ${tournament.humanWins}–${tournament.machineWins} · Round ${tournament.roundsPlayed + 1}`;
+
+  const rows = tournament.history.map((entry) => {
+    const outcomeText = entry.outcome === "human"
+      ? `${entry.playerName} wins`
+      : entry.outcome === "machine"
+        ? "Machine wins"
+        : entry.outcome === "tie"
+          ? "Tie"
+          : "No clear hand";
+    const row = document.createElement("li");
+    const roundLabel = document.createElement("span");
+    const outcomeLabel = document.createElement("span");
+    const scoreLabel = document.createElement("strong");
+    roundLabel.textContent = `Round ${entry.round}`;
+    outcomeLabel.textContent = outcomeText;
+    scoreLabel.textContent = `${entry.humanWins}–${entry.machineWins}`;
+    row.append(roundLabel, outcomeLabel, scoreLabel);
+    return row;
+  });
+  tournamentHistoryEl.replaceChildren(...rows);
+}
+
+function startNewTournament() {
+  tournament = createTournament(Number(tournamentBestOfEl.value));
+  renderTournamentScoreboard();
+  playButton.disabled = !cameraRunning;
+  resultEl.textContent = "New tournament ready";
+}
+
+function getRoundPlayers() {
+  const humanCount = Math.max(1, Math.min(4, Number(playerCountEl.value) || 1));
+  const players = [];
+
+  for (let index = 0; index < humanCount; index += 1) {
+    const player = humanPlayers[index] || { name: defaultHumanNames[index], score: 0 };
+    const value = index === 0 ? getFinalHumanMove() : getManualPlayerMove(index);
+    const trimmedName = (player.name || defaultHumanNames[index] || `Player ${index + 1}`).trim();
+    players.push({
+      index,
+      name: trimmedName || defaultHumanNames[index] || `Player ${index + 1}`,
+      move: value,
+    });
+  }
+
+  return players;
+}
+
+function getManualPlayerMove(index) {
+  if (demoMode && index > 0) {
+    return randomMove();
+  }
+
+  const selector = humanPlayersEl.querySelector(`.player-move[data-index="${index}"]`);
+  if (!selector) return "unknown";
+  const move = selector.dataset.move;
+  return isRpsMove(move) ? move : "unknown";
+}
+
+function setPlayerMoveStatus(index, move) {
+  const statusEl = humanPlayersEl.querySelector(`.player-move[data-index="${index}"]`);
+  if (!statusEl) return;
+
+  if (index === 0) {
+    statusEl.dataset.move = "camera";
+    statusEl.textContent = "Camera";
+    return;
+  }
+
+  const normalized = isRpsMove(move) ? move : "waiting";
+  statusEl.dataset.move = normalized;
+  statusEl.textContent = normalized === "waiting" ? "Waiting" : capitalizeMove(normalized);
+}
+
+function capitalizeMove(move) {
+  if (!move) return "Waiting";
+  return move.charAt(0).toUpperCase() + move.slice(1);
+}
+
+function renderPlayerScores() {
+  const names = [...humanPlayers].slice(0, Number(playerCountEl.value) || 1).map((player) => ({
+    name: player.name || "Player",
+    score: player.score,
+  }));
+
+  const rows = [{ name: "Bot", score: score.machine }, ...names];
+  playerScoreboardEl.innerHTML = rows
+    .map((entry) => `<div class="player-score"><span>${entry.name}</span><strong>${entry.score}</strong></div>`)
+    .join("");
+
+  renderLobbyPlayers();
+}
+
+function syncHumanPlayers() {
+  const humanCount = Math.max(1, Math.min(4, Number(playerCountEl.value) || 1));
+  const rows = humanPlayersEl.querySelectorAll(".human-player");
+
+  rows.forEach((row) => {
+    const rowIndex = Number(row.dataset.index);
+    const input = row.querySelector(".player-name");
+    const shouldShow = rowIndex < humanCount;
+    row.hidden = !shouldShow;
+    if (shouldShow) {
+      const value = "Player";
+      input.value = value;
+      humanPlayers[rowIndex] = {
+        ...(humanPlayers[rowIndex] || { score: 0 }),
+        name: value,
+      };
+      setPlayerMoveStatus(rowIndex, rowIndex === 0 ? "camera" : "waiting");
+    }
+  });
+
+  renderPlayerScores();
 }
 
 function getOutcome(humanMove, machineMove) {
@@ -608,6 +1021,13 @@ function normalizeSample(sample) {
 
 cameraButton.addEventListener("click", startCamera);
 playButton.addEventListener("click", playRound);
+joinRoomButton.addEventListener("click", joinRoom);
+demo2Button.addEventListener("click", () => setDemoMode(2));
+demo3Button.addEventListener("click", () => setDemoMode(3));
+demo4Button.addEventListener("click", () => setDemoMode(4));
+roleButtons.forEach((button) => {
+  button.addEventListener("click", () => setSelectedRole(button.dataset.role));
+});
 unbeatableMode.addEventListener("click", () => setMode("unbeatable"));
 predictMode.addEventListener("click", () => setMode("predict"));
 captureButton.addEventListener("click", capturePose);
@@ -615,7 +1035,41 @@ recordButton.addEventListener("click", toggleMotionRecording);
 exportButton.addEventListener("click", exportDataset);
 importButton.addEventListener("click", () => importFile.click());
 importFile.addEventListener("change", importDataset);
+playerCountEl.addEventListener("change", () => {
+  demoMode = false;
+  const totalPlayers = Math.max(1, Math.min(4, Number(playerCountEl.value) || 1));
+  for (let index = 0; index < 4; index += 1) {
+    humanPlayers[index] = {
+      name: index < totalPlayers ? `Player ${index + 1}` : defaultHumanNames[index],
+      score: humanPlayers[index]?.score || 0,
+    };
+  }
+  syncHumanPlayers();
+});
+tournamentEnabledEl.addEventListener("change", () => {
+  tournamentBestOfEl.disabled = tournamentEnabledEl.checked;
+  resetTournamentButton.hidden = !tournamentEnabledEl.checked;
+  tournament = createTournament(Number(tournamentBestOfEl.value));
+  renderTournamentScoreboard();
+  playButton.disabled = !cameraRunning;
+  if (tournamentEnabledEl.checked) resultEl.textContent = "Tournament ready";
+});
+resetTournamentButton.addEventListener("click", startNewTournament);
+humanPlayersEl.addEventListener("input", (event) => {
+  const target = event.target;
+  if (!target.matches(".player-name")) return;
+
+  const index = Number(target.dataset.index);
+  if (Number.isNaN(index)) return;
+  humanPlayers[index].name = target.value.trim() || defaultHumanNames[index] || `Player ${index + 1}`;
+  renderPlayerScores();
+});
 
 cameraButton.disabled = true;
 updateDatasetCount();
+syncHumanPlayers();
+renderPlayerScores();
+renderLobbyPlayers();
+renderTournamentScoreboard();
+roomCodeBadge.textContent = roomCode;
 bootModel();

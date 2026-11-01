@@ -12,6 +12,7 @@ A browser-based camera game that recognizes a player's hand pose or motion and p
 - Two gameplay modes:
   - `Counter` mode: machine reacts to the final detected hand just before shoot.
   - `Predict` mode: machine uses early countdown samples to anticipate your move.
+- Optional Tournament Mode: play a best-of-3, best-of-5, or best-of-7 series against the machine, with a round-by-round score and trophy winner.
 - Self-learning dataset trainer for static poses and motion gestures.
 - Gesture label input for naming custom captures.
 - Capture and record UI controls:
@@ -25,6 +26,7 @@ A browser-based camera game that recognizes a player's hand pose or motion and p
 
 - `Start Camera`: open webcam access and enable game controls.
 - `Play Round`: start a game round, count down, lock the machine move, and score.
+- `Tournament Mode`: enable a best-of series against the machine; ties do not award a series point. Start a new tournament after a winner is decided.
 - `Counter`: use the final detected move to choose the winning response.
 - `Predict`: use early gesture samples to predict and lock the machine's answer.
 - `gesture label`: type the name of the pose or motion before saving.

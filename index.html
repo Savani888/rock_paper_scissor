@@ -50,18 +50,134 @@
               <strong id="rounds">0</strong>
             </div>
             <div>
-              <span>Machine</span>
+              <span>Bot</span>
               <strong id="machineScore">0</strong>
             </div>
             <div>
-              <span>You</span>
+              <span>Humans</span>
               <strong id="humanScore">0</strong>
+            </div>
+          </div>
+
+          <section class="tournament-panel" aria-label="Tournament mode">
+            <div class="tournament-heading">
+              <strong>Tournament Mode</strong>
+              <label class="tournament-toggle" for="tournamentEnabled">
+                <input id="tournamentEnabled" type="checkbox" />
+                <span>On</span>
+              </label>
+            </div>
+            <p class="tournament-description">Camera player vs Machine. Ties do not count as a win.</p>
+            <label class="field-group" for="tournamentBestOf">
+              <span>Series length</span>
+              <select id="tournamentBestOf">
+                <option value="3">Best of 3 (first to 2)</option>
+                <option value="5" selected>Best of 5 (first to 3)</option>
+                <option value="7">Best of 7 (first to 4)</option>
+              </select>
+            </label>
+            <div id="tournamentStatus" class="tournament-status" aria-live="polite">Tournament mode is off</div>
+            <ol id="tournamentHistory" class="tournament-history" aria-label="Tournament round scoreboard"></ol>
+            <button id="resetTournamentButton" class="tournament-reset" type="button" hidden>Start New Tournament</button>
+          </section>
+
+          <div id="roomLobby" class="room-lobby" aria-label="Room lobby">
+            <div class="lobby-header">
+              <span>Room Lobby</span>
+              <strong id="roomCodeBadge">DEMO</strong>
+            </div>
+            <div id="lobbyPlayers" class="lobby-players"></div>
+          </div>
+
+          <div id="playerScoreboard" class="player-scoreboard" aria-label="Live scores"></div>
+
+          <div class="room-panel match-setup" aria-label="Room controls">
+            <div class="setup-header">
+              <span>Match Setup</span>
+            </div>
+
+            <div class="field-group">
+              <span>Role</span>
+              <div class="role-row" role="group" aria-label="Join as">
+                <button class="role-option active" type="button" data-role="host">Host</button>
+                <button class="role-option" type="button" data-role="participant">Participant</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <span>Player name</span>
+              <input id="playerName" type="text" value="Host" placeholder="Your name" />
+            </div>
+
+            <div class="field-group">
+              <span>Room code</span>
+              <input id="roomCode" type="text" value="DEMO" placeholder="Room code" />
+            </div>
+
+            <div class="actions compact">
+              <button id="joinRoomButton" type="button">Join Room</button>
+            </div>
+
+            <div class="room-status" id="roomStatus">Not connected</div>
+          </div>
+
+          <div class="quick-start" aria-label="Quick start guide">
+            <div class="quick-start-header">Quick Start</div>
+            <ol class="step-list">
+              <li><span class="step-number">1</span><span>Pick Host or Participant</span></li>
+              <li><span class="step-number">2</span><span>Enter your name and room code</span></li>
+              <li><span class="step-number">3</span><span>Click Join Room</span></li>
+              <li><span class="step-number">4</span><span>Host starts the round; participant waits</span></li>
+            </ol>
+          </div>
+
+          <div class="player-config" aria-label="Player configuration">
+            <label class="field-group" for="playerCount">
+              <span>Humans</span>
+              <select id="playerCount">
+                <option value="1">1 human</option>
+                <option value="2">2 humans</option>
+                <option value="3">3 humans</option>
+                <option value="4">4 humans</option>
+              </select>
+            </label>
+
+            <div id="humanPlayers" class="human-players" aria-label="Human players">
+              <label class="human-player" data-index="0">
+                <span>Player</span>
+                <input class="player-name" data-index="0" type="text" value="Player" />
+                <div class="player-move" data-index="0" data-move="camera">Camera</div>
+              </label>
+
+              <label class="human-player" data-index="1">
+                <span>Player</span>
+                <input class="player-name" data-index="1" type="text" value="Player" />
+                <div class="player-move" data-index="1" data-move="waiting">Waiting</div>
+              </label>
+
+              <label class="human-player" data-index="2">
+                <span>Player</span>
+                <input class="player-name" data-index="2" type="text" value="Player" />
+                <div class="player-move" data-index="2" data-move="waiting">Waiting</div>
+              </label>
+
+              <label class="human-player" data-index="3">
+                <span>Player</span>
+                <input class="player-name" data-index="3" type="text" value="Player" />
+                <div class="player-move" data-index="3" data-move="waiting">Waiting</div>
+              </label>
             </div>
           </div>
 
           <div class="mode-row" role="group" aria-label="Mode">
             <button class="mode active" id="unbeatableMode" type="button">Counter</button>
             <button class="mode" id="predictMode" type="button">Predict</button>
+          </div>
+
+          <div class="demo-row" aria-label="Presentation demo controls">
+            <button class="demo-button" id="demo2Button" type="button">Demo 2 Players</button>
+            <button class="demo-button" id="demo3Button" type="button">Demo 3 Players</button>
+            <button class="demo-button" id="demo4Button" type="button">Demo 4 Players</button>
           </div>
 
           <div class="actions">
